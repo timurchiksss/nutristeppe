@@ -1,0 +1,191 @@
+import streamlit as st
+import pandas as pd
+import psycopg2
+import re
+import os 
+from dotenv import load_dotenv
+
+load_dotenv()
+
+st.set_page_config(layout="wide")
+st.markdown("""
+    <style>
+    [data-testid="stMetricValue"] {
+        font-size: 18px !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 12px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+def clean_and_sort(data):
+    clean = [str(x).replace('С', 'C').strip().upper() for x in data if x and str(x).lower() != 'none']
+    clean = list(set(clean))
+    def natural_key(string_):
+        return [int(s) if s.isdigit() else s for s in re.split(r'(\d+)', string_)]  
+    return sorted(clean, key=natural_key)
+
+def writer(df, df_mealtime, meal_time, meal_name):
+    query = """
+        SELECT dish_category_code,
+                AVG(kilocalories) AS kcal,
+                AVG(protein)      AS protein,
+                AVG(fat)          AS fat,
+                AVG(carbohydrate) AS carbohydrate
+        FROM dishes
+        WHERE dish_category_code IN %s
+            AND type_5 IN (1, 2)
+            AND type IS NOT NULL
+        GROUP BY dish_category_code
+    """
+    cur.execute(query, (tuple(meal_time),))
+    rows = cur.fetchall()
+    new_rows = pd.DataFrame(rows, columns=["dish_category_code", "kcal", "protein", "fat", "carbohydrate"])
+    new_rows["meal"] = meal_name
+    df = pd.concat([df, new_rows], ignore_index=True)
+    df[["kcal", "protein", "fat", "carbohydrate"]] = df[["kcal", "protein", "fat", "carbohydrate"]].astype(float).fillna(0.0)
+
+    total = df["protein"] + df["fat"] + df["carbohydrate"]
+    df["protein_%"]      = (df["protein"] * 100 / total).fillna(0.0)
+    df["fat_%"]          = (df["fat"] * 100 / total).fillna(0.0)
+    df["carbohydrate_%"] = (df["carbohydrate"] * 100 / total).fillna(0.0)
+
+    meal_time = df[df["meal"] == meal_name]
+    total = meal_time["protein"].sum() + meal_time["fat"].sum() + meal_time["carbohydrate"].sum()
+
+    kcal_mean = meal_time["kcal"].mean()
+    p_mean    = meal_time["protein"].mean()
+    f_mean    = meal_time["fat"].mean()
+    c_mean    = meal_time["carbohydrate"].mean()
+
+    total_macros = p_mean + f_mean + c_mean
+    p_pct = (p_mean * 100 / total_macros) if total_macros else 0.0
+    f_pct = (f_mean * 100 / total_macros) if total_macros else 0.0
+    c_pct = (c_mean * 100 / total_macros) if total_macros else 0.0
+
+    st.metric("AVG Ккал:", f"{kcal_mean:.2f}")
+    st.metric("Белки:", f"{p_mean:.2f} | {p_pct:.2f} %")
+    st.metric("Жиры:", f"{f_mean:.2f} | {f_pct:.2f} %")
+    st.metric("Углеводы:", f"{c_mean:.2f} | {c_pct:.2f} %")
+
+    new_meal_row = pd.DataFrame([{
+        "meal": meal_name,
+        "kcal_total": kcal_mean,
+        "protein_total": p_mean,
+        "fat_total": f_mean,
+        "carbohydrate_total": c_mean,
+    }])
+    df_mealtime = pd.concat([df_mealtime, new_meal_row], ignore_index=True)
+
+    return df, df_mealtime
+
+df = pd.DataFrame(columns=["meal", "dish_category_code", "kcal", "protein", "fat", "carbohydrate", "protein_%", "fat_%", "carbohydrate_%"])
+df_mealtime = pd.DataFrame(columns=["meal", "kcal_total", "protein_total", "fat_total", "carbohydrate_total", "kcal_%"])
+
+DB_CONFIG = {
+    "host": os.getenv("DB_HOST"),
+    "database": os.getenv("DB_NAME"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+    "port": os.getenv("DB_PORT"),
+}
+
+conn = psycopg2.connect(**DB_CONFIG)
+cur = conn.cursor()
+cur.execute("select distinct(dish_category_code) from dishes WHERE dish_category_code IS NOT NULL AND dish_category_code != '' AND type_5 in (1,2) and type is not null and dish_category_code is not null ORDER BY dish_category_code ASC;")
+
+dish_codes_raw = list(set([row[0] for row in cur.fetchall() if row[0]]))
+dish_codes = clean_and_sort(dish_codes_raw)
+print(dish_codes)
+
+st.markdown("<h2 style='text-align: center;'>Total</h2>", unsafe_allow_html=True)
+kcal, protein, fat, carb = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
+
+with col1:
+    # breakfast_threshold = st.number_input("Max breakfast %", step=1)
+    breakfast = st.multiselect(
+        "Завтрак:",
+        options=dish_codes, 
+        key="bf"
+    )
+    # st.write(f"Вы выбрали: {breakfast}")
+    if breakfast:
+        df, df_mealtime = writer(df, df_mealtime, breakfast, 'breakfast')
+    else:
+        st.info("Выберите блюда, чтобы рассчитать среднее.")
+with col2:
+    # snack1_threshold = st.number_input("Max Snack1 %", step=1)
+    snack1 = st.multiselect(
+        "Перекус 1:",
+        options=dish_codes, 
+        key="s1"
+    )
+    # st.write(f"Вы выбрали: {snack1}")
+    if snack1:
+        df, df_mealtime = writer(df, df_mealtime, snack1, 'snack1')
+    else:
+        st.info("Выберите блюда, чтобы рассчитать среднее.")
+with col3:
+    # lunch_threshold = st.number_input("Max lunch %", step=1)
+    lunch = st.multiselect(
+        "Обед:",
+        options=dish_codes, 
+        key="lunch"
+    )
+    # st.write(f"Вы выбрали: {lunch}")
+    if lunch:
+        df, df_mealtime = writer(df, df_mealtime, lunch, 'lunch')
+    else:
+        st.info("Выберите блюда, чтобы рассчитать среднее.")
+with col4:
+    # snack2_threshold = st.number_input("Max snack2 %", step=1)
+    snack2 = st.multiselect(
+        "Перекус 2:",
+        options=dish_codes, 
+        key="s2"
+    )
+    # st.write(f"Вы выбрали: {snack2}")
+    if snack2:
+        df, df_mealtime = writer(df, df_mealtime, snack2, 'snack2')
+    else:
+        st.info("Выберите блюда, чтобы рассчитать среднее.")
+with col5:
+    # dinner_threshold = st.number_input("Max dinner %", step=1)
+    dinner = st.multiselect(
+        "Ужин:",
+        options=dish_codes, 
+        key="dinner"
+    )
+    # st.write(f"Вы выбрали: {dinner}")
+    if dinner:
+        df, df_mealtime = writer(df, df_mealtime, dinner, 'dinner')
+    else:
+        st.info("Выберите блюда, чтобы рассчитать среднее.")
+
+total_kcal = df_mealtime["kcal_total"].sum()
+df_mealtime["kcal_%"] = df_mealtime["kcal_total"] * 100 / total_kcal if total_kcal else 0.0
+
+if not df_mealtime.empty:
+    st.dataframe(df_mealtime)
+
+if not df.empty:
+    st.dataframe(df)
+
+kcal_total         = df_mealtime["kcal_total"].sum()
+protein_total      = df_mealtime["protein_total"].sum()
+fat_total          = df_mealtime["fat_total"].sum()
+carbohydrate_total = df_mealtime["carbohydrate_total"].sum()
+
+bzu_total = protein_total + fat_total + carbohydrate_total
+
+with kcal:
+    st.metric("sum AVG Ккал:", f"{kcal_total:.2f}" if kcal_total else 0)
+with protein:
+    st.metric("Белки:", f"{protein_total:.2f} | {(protein_total*100/bzu_total):.2f} %" if protein_total else 0)
+with fat:
+    st.metric("Жиры:", f"{fat_total:.2f} | {(fat_total*100/bzu_total):.2f} %" if fat_total else 0)
+with carb:
+    st.metric("Углеводы:", f"{carbohydrate_total:.2f} | {(carbohydrate_total*100/bzu_total):.2f} %" if carbohydrate_total else 0)
+
