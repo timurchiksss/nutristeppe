@@ -35,7 +35,7 @@ def writer(df, df_mealtime, meal_time, meal_name):
                 AVG(carbohydrate) AS carbohydrate
         FROM dishes
         WHERE dish_category_code IN %s
-            AND type_5 IN (1, 2)
+            AND availability_type IN (1, 2)
             AND type IS NOT NULL
         GROUP BY dish_category_code
     """
@@ -93,7 +93,7 @@ DB_CONFIG = {
 
 conn = psycopg2.connect(**DB_CONFIG)
 cur = conn.cursor()
-cur.execute("select distinct(dish_category_code) from dishes WHERE dish_category_code IS NOT NULL AND dish_category_code != '' AND type_5 in (1,2) and type is not null and dish_category_code is not null ORDER BY dish_category_code ASC;")
+cur.execute("select distinct(dish_category_code) from dishes WHERE dish_category_code IS NOT NULL AND dish_category_code != '' AND availability_type in (1,2) and type is not null and dish_category_code is not null ORDER BY dish_category_code ASC;")
 
 dish_codes_raw = list(set([row[0] for row in cur.fetchall() if row[0]]))
 dish_codes = clean_and_sort(dish_codes_raw)
