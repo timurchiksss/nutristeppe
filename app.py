@@ -54,27 +54,30 @@ def writer(df, df_mealtime, meal_time, meal_name):
     meal_time = df[df["meal"] == meal_name]
     total = meal_time["protein"].sum() + meal_time["fat"].sum() + meal_time["carbohydrate"].sum()
 
-    kcal_mean = meal_time["kcal"].mean()
-    p_mean    = meal_time["protein"].mean()
-    f_mean    = meal_time["fat"].mean()
-    c_mean    = meal_time["carbohydrate"].mean()
+    kcal_mean = meal_time["kcal"].sum()
+    p_sum    = meal_time["protein"].sum()
+    f_sum    = meal_time["fat"].sum()
+    c_sum    = meal_time["carbohydrate"].sum()
 
-    total_macros = p_mean + f_mean + c_mean
-    p_pct = (p_mean * 100 / total_macros) if total_macros else 0.0
-    f_pct = (f_mean * 100 / total_macros) if total_macros else 0.0
-    c_pct = (c_mean * 100 / total_macros) if total_macros else 0.0
+    total_macros = p_sum + f_sum + c_sum
+    p_pct = (p_sum * 100 / total_macros) if total_macros else 0.0
+    f_pct = (f_sum * 100 / total_macros) if total_macros else 0.0
+    c_pct = (c_sum * 100 / total_macros) if total_macros else 0.0
+
+    calculated_kcal = ((p_sum + c_sum) * 4) + (f_sum * 9)
 
     st.metric("AVG Ккал:", f"{kcal_mean:.2f}")
-    st.metric("Белки:", f"{p_mean:.2f} | {p_pct:.2f} %")
-    st.metric("Жиры:", f"{f_mean:.2f} | {f_pct:.2f} %")
-    st.metric("Углеводы:", f"{c_mean:.2f} | {c_pct:.2f} %")
+    st.metric("Посчитанные ккал:", f"{calculated_kcal:.2f}")
+    st.metric("Белки:", f"{p_sum:.2f} | {p_pct:.2f} %")
+    st.metric("Жиры:", f"{f_sum:.2f} | {f_pct:.2f} %")
+    st.metric("Углеводы:", f"{c_sum:.2f} | {c_pct:.2f} %")
 
     new_meal_row = pd.DataFrame([{
         "meal": meal_name,
         "kcal_total": kcal_mean,
-        "protein_total": p_mean,
-        "fat_total": f_mean,
-        "carbohydrate_total": c_mean,
+        "protein_total": p_sum,
+        "fat_total": f_sum,
+        "carbohydrate_total": c_sum,
     }])
     df_mealtime = pd.concat([df_mealtime, new_meal_row], ignore_index=True)
 
