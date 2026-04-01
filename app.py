@@ -64,10 +64,10 @@ def writer(df, df_mealtime, meal_time, meal_name):
     f_pct = (f_sum * 100 / total_macros) if total_macros else 0.0
     c_pct = (c_sum * 100 / total_macros) if total_macros else 0.0
 
-    calculated_kcal = ((p_sum + c_sum) * 4) + (f_sum * 9)
+    # calculated_kcal = ((p_sum + c_sum) * 4) + (f_sum * 9)
 
     st.metric("AVG Ккал:", f"{kcal_mean:.2f}")
-    st.metric("Посчитанные ккал:", f"{calculated_kcal:.2f}")
+    # st.metric("Посчитанные ккал:", f"{calculated_kcal:.2f}")
     st.metric("Белки:", f"{p_sum:.2f} | {p_pct:.2f} %")
     st.metric("Жиры:", f"{f_sum:.2f} | {f_pct:.2f} %")
     st.metric("Углеводы:", f"{c_sum:.2f} | {c_pct:.2f} %")
