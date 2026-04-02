@@ -4,6 +4,7 @@ import psycopg2
 import re
 import os 
 from dotenv import load_dotenv
+import io
 
 load_dotenv()
 
@@ -43,6 +44,7 @@ def writer(df, df_mealtime, meal_time, meal_name):
     rows = cur.fetchall()
     new_rows = pd.DataFrame(rows, columns=["dish_category_code", "kcal", "protein", "fat", "carbohydrate"])
     new_rows["meal"] = meal_name
+    new_rows[["protein", "fat", "carbohydrate"]] /= 1000
     df = pd.concat([df, new_rows], ignore_index=True)
     df[["kcal", "protein", "fat", "carbohydrate"]] = df[["kcal", "protein", "fat", "carbohydrate"]].astype(float).fillna(0.0)
 
@@ -66,11 +68,11 @@ def writer(df, df_mealtime, meal_time, meal_name):
 
     # calculated_kcal = ((p_sum + c_sum) * 4) + (f_sum * 9)
 
-    st.metric("AVG Ккал:", f"{kcal_mean:.2f}")
+    st.metric("AVG Ккал:", f"{kcal_mean:.1f}")
     # st.metric("Посчитанные ккал:", f"{calculated_kcal:.2f}")
-    st.metric("Белки:", f"{p_sum:.2f} | {p_pct:.2f} %")
-    st.metric("Жиры:", f"{f_sum:.2f} | {f_pct:.2f} %")
-    st.metric("Углеводы:", f"{c_sum:.2f} | {c_pct:.2f} %")
+    st.metric("Белки:", f"{p_sum:.1f} | {p_pct:.1f} %")
+    st.metric("Жиры:", f"{f_sum:.1f} | {f_pct:.1f} %")
+    st.metric("Углеводы:", f"{c_sum:.1f} | {c_pct:.1f} %")
 
     new_meal_row = pd.DataFrame([{
         "meal": meal_name,
@@ -85,6 +87,9 @@ def writer(df, df_mealtime, meal_time, meal_name):
 
 df = pd.DataFrame(columns=["meal", "dish_category_code", "kcal", "protein", "fat", "carbohydrate", "protein_%", "fat_%", "carbohydrate_%"])
 df_mealtime = pd.DataFrame(columns=["meal", "kcal_total", "protein_total", "fat_total", "carbohydrate_total", "kcal_%"])
+
+df = df.round(1)
+df_mealtime = df_mealtime.round(1)
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
@@ -170,6 +175,9 @@ with col5:
 total_kcal = df_mealtime["kcal_total"].sum()
 df_mealtime["kcal_%"] = df_mealtime["kcal_total"] * 100 / total_kcal if total_kcal else 0.0
 
+df = df.round(1)
+df_mealtime = df_mealtime.round(1)
+
 if not df_mealtime.empty:
     st.dataframe(df_mealtime)
 
@@ -184,11 +192,29 @@ carbohydrate_total = df_mealtime["carbohydrate_total"].sum()
 bzu_total = protein_total + fat_total + carbohydrate_total
 
 with kcal:
-    st.metric("sum AVG Ккал:", f"{kcal_total:.2f}" if kcal_total else 0)
+    st.metric("sum AVG Ккал:", f"{kcal_total:.1f}" if kcal_total else 0)
 with protein:
-    st.metric("Белки:", f"{protein_total:.2f} | {(protein_total*100/bzu_total):.2f} %" if protein_total else 0)
+    st.metric("Белки:", f"{protein_total:.1f} | {(protein_total*100/bzu_total):.1f} %" if protein_total else 0)
 with fat:
-    st.metric("Жиры:", f"{fat_total:.2f} | {(fat_total*100/bzu_total):.2f} %" if fat_total else 0)
+    st.metric("Жиры:", f"{fat_total:.1f} | {(fat_total*100/bzu_total):.1f} %" if fat_total else 0)
 with carb:
-    st.metric("Углеводы:", f"{carbohydrate_total:.2f} | {(carbohydrate_total*100/bzu_total):.2f} %" if carbohydrate_total else 0)
+    st.metric("Углеводы:", f"{carbohydrate_total:.1f} | {(carbohydrate_total*100/bzu_total):.1f} %" if carbohydrate_total else 0)
 
+if not df_mealtime.empty or not df.empty:
+    st.divider()
+    st.subheader("Выгрузка результатов")
+    
+    buffer = io.BytesIO()
+    
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer_engine:
+        if not df_mealtime.empty:
+            df_mealtime.to_excel(writer_engine, index=False, sheet_name='Summary_Meals')
+        if not df.empty:
+            df.to_excel(writer_engine, index=False, sheet_name='Detailed_Stats')
+            
+    st.download_button(
+        label="📥 Скачать расчет в Excel",
+        data=buffer.getvalue(),
+        file_name="diet_report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
