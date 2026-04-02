@@ -33,7 +33,8 @@ def writer(df, df_mealtime, meal_time, meal_name):
                 AVG(kilocalories) AS kcal,
                 AVG(protein)      AS protein,
                 AVG(fat)          AS fat,
-                AVG(carbohydrate) AS carbohydrate
+                AVG(carbohydrate) AS carbohydrate,
+                AVG(serving_size_g)
         FROM dishes
         WHERE dish_category_code IN %s
             AND availability_type IN (1, 2)
@@ -42,11 +43,16 @@ def writer(df, df_mealtime, meal_time, meal_name):
     """
     cur.execute(query, (tuple(meal_time),))
     rows = cur.fetchall()
-    new_rows = pd.DataFrame(rows, columns=["dish_category_code", "kcal", "protein", "fat", "carbohydrate"])
+    new_rows = pd.DataFrame(rows, columns=["dish_category_code", "kcal", "protein", "fat", "carbohydrate", "serving_size_g"])
     new_rows["meal"] = meal_name
     new_rows[["protein", "fat", "carbohydrate"]] /= 1000
     df = pd.concat([df, new_rows], ignore_index=True)
-    df[["kcal", "protein", "fat", "carbohydrate"]] = df[["kcal", "protein", "fat", "carbohydrate"]].astype(float).fillna(0.0)
+    df[["kcal", "protein", "fat", "carbohydrate", "serving_size_g"]] = df[["kcal", "protein", "fat", "carbohydrate", "serving_size_g"]].astype(float).fillna(0.0)
+
+    df["kcal"]         = (df["kcal"] * (df["serving_size_g"]/100)).fillna(0.0)
+    df["protein"]      = (df["protein"] * (df["serving_size_g"]/100)).fillna(0.0)
+    df["fat"]          = (df["fat"] * (df["serving_size_g"]/100)).fillna(0.0)
+    df["carbohydrate"] = (df["carbohydrate"] * (df["serving_size_g"]/100)).fillna(0.0)
 
     total = df["protein"] + df["fat"] + df["carbohydrate"]
     df["protein_%"]      = (df["protein"] * 100 / total).fillna(0.0)
