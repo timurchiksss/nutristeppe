@@ -106,7 +106,7 @@ DB_CONFIG = {
 
 conn = psycopg2.connect(**DB_CONFIG)
 cur = conn.cursor()
-cur.execute("select distinct(dish_category_code) from dishes WHERE dish_category_code IS NOT NULL AND dish_category_code != '' AND availability_type in (1,2) and type is not null and dish_category_code is not null ORDER BY dish_category_code ASC;")
+cur.execute("select distinct(dish_category_code) from dishes WHERE dish_category_code IS NOT NULL AND dish_category_code != '' ORDER BY dish_category_code ASC;")
 
 dish_codes_raw = list(set([row[0] for row in cur.fetchall() if row[0]]))
 dish_codes = clean_and_sort(dish_codes_raw)
