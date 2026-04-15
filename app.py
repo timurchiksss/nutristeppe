@@ -36,8 +36,6 @@ def writer(df, df_mealtime, meal_time, meal_name):
                 AVG(carbohydrate_portion) AS carbohydrate
         FROM dishes
         WHERE dish_category_code IN %s
-            AND availability_type IN (1, 2)
-            AND type IS NOT NULL
         GROUP BY dish_category_code
     """
     cur.execute(query, (tuple(meal_time),))
