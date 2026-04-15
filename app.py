@@ -9,17 +9,14 @@ import io
 load_dotenv()
 
 st.set_page_config(layout="wide")
-
-# Инициализация session_state (чтобы данные сохранялись между запусками)
-if 'df' not in st.session_state:
-    st.session_state.df = pd.DataFrame(columns=["meal", "dish_category_code", "kcal", "protein", "fat", "carbohydrate", "protein_%", "fat_%", "carbohydrate_%"])
-if 'df_mealtime' not in st.session_state:
-    st.session_state.df_mealtime = pd.DataFrame(columns=["meal", "kcal_total", "protein_total", "fat_total", "carbohydrate_total", "kcal_%"])
-
 st.markdown("""
     <style>
-    [data-testid="stMetricValue"] { font-size: 18px !important; }
-    [data-testid="stMetricLabel"] { font-size: 12px !important; }
+    [data-testid="stMetricValue"] {
+        font-size: 18px !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 12px !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -30,11 +27,7 @@ def clean_and_sort(data):
         return [int(s) if s.isdigit() else s for s in re.split(r'(\d+)', string_)]  
     return sorted(clean, key=natural_key)
 
-def writer(df_input, df_meal_input, meal_codes, meal_name):
-    """
-    Принимает текущие датафреймы, список кодов и название приема пищи.
-    Возвращает обновленные датафреймы.
-    """
+def writer(df, df_mealtime, meal_time, meal_name):
     query = """
         SELECT dish_category_code,
                 AVG(kcal_portion) AS kcal,
@@ -47,51 +40,62 @@ def writer(df_input, df_meal_input, meal_codes, meal_name):
             AND type IS NOT NULL
         GROUP BY dish_category_code
     """
-    cur.execute(query, (tuple(meal_codes),))
+    cur.execute(query, (tuple(meal_time),))
     rows = cur.fetchall()
-    
     new_rows = pd.DataFrame(rows, columns=["dish_category_code", "kcal", "protein", "fat", "carbohydrate"])
     new_rows["meal"] = meal_name
-    
-    # Конвертация и очистка
-    new_rows[["protein", "fat", "carbohydrate"]] = new_rows[["protein", "fat", "carbohydrate"]].astype(float) / 1000
-    new_rows["kcal"] = new_rows["kcal"].astype(float)
-    new_rows = new_rows.fillna(0.0)
+    new_rows[["protein", "fat", "carbohydrate"]] /= 1000
+    df = pd.concat([df, new_rows], ignore_index=True)
+    df[["kcal", "protein", "fat", "carbohydrate"]] = df[["kcal", "protein", "fat", "carbohydrate"]].astype(float).fillna(0.0)
 
-    # Расчет процентов внутри категорий
-    total_m = new_rows["protein"] + new_rows["fat"] + new_rows["carbohydrate"]
-    new_rows["protein_%"] = (new_rows["protein"] * 100 / total_m).fillna(0.0)
-    new_rows["fat_%"] = (new_rows["fat"] * 100 / total_m).fillna(0.0)
-    new_rows["carbohydrate_%"] = (new_rows["carbohydrate"] * 100 / total_m).fillna(0.0)
+    # df["kcal"]         = (df["kcal"] * (df["serving_size_g"]/100)).fillna(0.0)
+    # df["protein"]      = (df["protein"] * (df["serving_size_g"]/100)).fillna(0.0)
+    # df["fat"]          = (df["fat"] * (df["serving_size_g"]/100)).fillna(0.0)
+    # df["carbohydrate"] = (df["carbohydrate"] * (df["serving_size_g"]/100)).fillna(0.0)
 
-    # Обновляем основной DF
-    df_output = pd.concat([df_input, new_rows], ignore_index=True)
+    total = df["protein"] + df["fat"] + df["carbohydrate"]
+    df["protein_%"]      = (df["protein"] * 100 / total).fillna(0.0)
+    df["fat_%"]          = (df["fat"] * 100 / total).fillna(0.0)
+    df["carbohydrate_%"] = (df["carbohydrate"] * 100 / total).fillna(0.0)
 
-    # Метрики для отображения в колонке
-    kcal_sum = new_rows["kcal"].sum()
-    p_sum = new_rows["protein"].sum()
-    f_sum = new_rows["fat"].sum()
-    c_sum = new_rows["carbohydrate"].sum()
-    
+    meal_time = df[df["meal"] == meal_name]
+    total = meal_time["protein"].sum() + meal_time["fat"].sum() + meal_time["carbohydrate"].sum()
+
+    kcal_mean = meal_time["kcal"].sum()
+    p_sum    = meal_time["protein"].sum()
+    f_sum    = meal_time["fat"].sum()
+    c_sum    = meal_time["carbohydrate"].sum()
+
     total_macros = p_sum + f_sum + c_sum
-    st.metric("AVG Ккал:", f"{kcal_sum:.1f}")
-    st.metric("Белки:", f"{p_sum:.1f} | {(p_sum*100/total_macros if total_macros else 0):.1f} %")
-    st.metric("Жиры:", f"{f_sum:.1f} | {(f_sum*100/total_macros if total_macros else 0):.1f} %")
-    st.metric("Углеводы:", f"{c_sum:.1f} | {(c_sum*100/total_macros if total_macros else 0):.1f} %")
+    p_pct = (p_sum * 100 / total_macros) if total_macros else 0.0
+    f_pct = (f_sum * 100 / total_macros) if total_macros else 0.0
+    c_pct = (c_sum * 100 / total_macros) if total_macros else 0.0
 
-    # Обновляем DF по приемам пищи
+    # calculated_kcal = ((p_sum + c_sum) * 4) + (f_sum * 9)
+
+    st.metric("AVG Ккал:", f"{kcal_mean:.1f}")
+    # st.metric("Посчитанные ккал:", f"{calculated_kcal:.2f}")
+    st.metric("Белки:", f"{p_sum:.1f} | {p_pct:.1f} %")
+    st.metric("Жиры:", f"{f_sum:.1f} | {f_pct:.1f} %")
+    st.metric("Углеводы:", f"{c_sum:.1f} | {c_pct:.1f} %")
+
     new_meal_row = pd.DataFrame([{
         "meal": meal_name,
-        "kcal_total": kcal_sum,
+        "kcal_total": kcal_mean,
         "protein_total": p_sum,
         "fat_total": f_sum,
         "carbohydrate_total": c_sum,
     }])
-    df_meal_output = pd.concat([df_meal_input, new_meal_row], ignore_index=True)
+    df_mealtime = pd.concat([df_mealtime, new_meal_row], ignore_index=True)
 
-    return df_output, df_meal_output
+    return df, df_mealtime
 
-# Подключение к БД
+df = pd.DataFrame(columns=["meal", "dish_category_code", "kcal", "protein", "fat", "carbohydrate", "protein_%", "fat_%", "carbohydrate_%"])
+df_mealtime = pd.DataFrame(columns=["meal", "kcal_total", "protein_total", "fat_total", "carbohydrate_total", "kcal_%"])
+
+df = df.round(1)
+df_mealtime = df_mealtime.round(1)
+
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "database": os.getenv("DB_NAME"),
@@ -99,77 +103,123 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD"),
     "port": os.getenv("DB_PORT"),
 }
+
 conn = psycopg2.connect(**DB_CONFIG)
 cur = conn.cursor()
+cur.execute("select distinct(dish_category_code) from dishes WHERE dish_category_code IS NOT NULL AND dish_category_code != '' AND availability_type in (1,2) and type is not null and dish_category_code is not null ORDER BY dish_category_code ASC;")
 
-# Получение кодов категорий
-cur.execute("SELECT DISTINCT dish_category_code FROM dishes WHERE dish_category_code IS NOT NULL AND availability_type IN (1,2) AND type IS NOT NULL ORDER BY dish_category_code ASC;")
-dish_codes_raw = [row[0] for row in cur.fetchall() if row[0]]
+dish_codes_raw = list(set([row[0] for row in cur.fetchall() if row[0]]))
 dish_codes = clean_and_sort(dish_codes_raw)
+print(dish_codes)
 
-# Создаем временные контейнеры для этого прогона (скрипт выполняется сверху вниз)
-current_df = pd.DataFrame()
-current_mealtime = pd.DataFrame()
-
-kcal_col, prot_col, fat_col, carb_col = st.columns(4)
-st.divider()
-
+st.markdown("<h2 style='text-align: center;'>Total</h2>", unsafe_allow_html=True)
+kcal, protein, fat, carb = st.columns(4)
 col1, col2, col3, col4, col5 = st.columns(5)
 
-# Словарь для итерации по колонкам (чтобы сохранить порядок строк)
-meal_configs = [
-    (col1, "Завтрак", "bf"),
-    (col2, "Перекус 1", "s1"),
-    (col3, "Обед", "lunch"),
-    (col4, "Перекус 2", "s2"),
-    (col5, "Ужин", "dinner")
-]
+with col1:
+    # breakfast_threshold = st.number_input("Max breakfast %", step=1)
+    breakfast = st.multiselect(
+        "Завтрак:",
+        options=dish_codes, 
+        key="bf"
+    )
+    # st.write(f"Вы выбрали: {breakfast}")
+    if breakfast:
+        df, df_mealtime = writer(df, df_mealtime, breakfast, 'breakfast')
+    else:
+        st.info("Выберите блюда, чтобы рассчитать среднее.")
+with col2:
+    # snack1_threshold = st.number_input("Max Snack1 %", step=1)
+    snack1 = st.multiselect(
+        "Перекус 1:",
+        options=dish_codes, 
+        key="s1"
+    )
+    # st.write(f"Вы выбрали: {snack1}")
+    if snack1:
+        df, df_mealtime = writer(df, df_mealtime, snack1, 'snack1')
+    else:
+        st.info("Выберите блюда, чтобы рассчитать среднее.")
+with col3:
+    # lunch_threshold = st.number_input("Max lunch %", step=1)
+    lunch = st.multiselect(
+        "Обед:",
+        options=dish_codes, 
+        key="lunch"
+    )
+    # st.write(f"Вы выбрали: {lunch}")
+    if lunch:
+        df, df_mealtime = writer(df, df_mealtime, lunch, 'lunch')
+    else:
+        st.info("Выберите блюда, чтобы рассчитать среднее.")
+with col4:
+    # snack2_threshold = st.number_input("Max snack2 %", step=1)
+    snack2 = st.multiselect(
+        "Перекус 2:",
+        options=dish_codes, 
+        key="s2"
+    )
+    # st.write(f"Вы выбрали: {snack2}")
+    if snack2:
+        df, df_mealtime = writer(df, df_mealtime, snack2, 'snack2')
+    else:
+        st.info("Выберите блюда, чтобы рассчитать среднее.")
+with col5:
+    # dinner_threshold = st.number_input("Max dinner %", step=1)
+    dinner = st.multiselect(
+        "Ужин:",
+        options=dish_codes, 
+        key="dinner"
+    )
+    # st.write(f"Вы выбрали: {dinner}")
+    if dinner:
+        df, df_mealtime = writer(df, df_mealtime, dinner, 'dinner')
+    else:
+        st.info("Выберите блюда, чтобы рассчитать среднее.")
 
-for col, name, key in meal_configs:
-    with col:
-        selected = st.multiselect(f"{name}:", options=dish_codes, key=key)
-        if selected:
-            current_df, current_mealtime = writer(current_df, current_mealtime, selected, name)
-        else:
-            st.info("Выберите категории")
+total_kcal = df_mealtime["kcal_total"].sum()
+df_mealtime["kcal_%"] = df_mealtime["kcal_total"] * 100 / total_kcal if total_kcal else 0.0
 
-# Финальные расчеты
-total_kcal = current_mealtime["kcal_total"].sum() if not current_mealtime.empty else 0
-if total_kcal > 0:
-    current_mealtime["kcal_%"] = (current_mealtime["kcal_total"] * 100 / total_kcal).round(1)
+df = df.round(1)
+df_mealtime = df_mealtime.round(1)
 
-# Вывод общих итогов в верхние метрики
-p_total = current_mealtime["protein_total"].sum() if not current_mealtime.empty else 0
-f_total = current_mealtime["fat_total"].sum() if not current_mealtime.empty else 0
-c_total = current_mealtime["carbohydrate_total"].sum() if not current_mealtime.empty else 0
-bzu_sum = p_total + f_total + c_total
+if not df_mealtime.empty:
+    st.dataframe(df_mealtime)
 
-with kcal_col: st.metric("Итого Ккал", f"{total_kcal:.1f}")
-with prot_col: st.metric("Белки", f"{p_total:.1f} | {(p_total*100/bzu_sum if bzu_sum else 0):.1f}%")
-with fat_col:  st.metric("Жиры", f"{f_total:.1f} | {(f_total*100/bzu_sum if bzu_sum else 0):.1f}%")
-with carb_col: st.metric("Углеводы", f"{c_total:.1f} | {(c_total*100/bzu_sum if bzu_sum else 0):.1f}%")
+if not df.empty:
+    st.dataframe(df)
 
-# Отображение таблиц
-if not current_mealtime.empty:
-    st.subheader("Сводка по приемам пищи")
-    st.dataframe(current_mealtime.round(1), use_container_width=True)
+kcal_total         = df_mealtime["kcal_total"].sum()
+protein_total      = df_mealtime["protein_total"].sum()
+fat_total          = df_mealtime["fat_total"].sum()
+carbohydrate_total = df_mealtime["carbohydrate_total"].sum()
 
-if not current_df.empty:
-    st.subheader("Детальная статистика по категориям")
-    st.dataframe(current_df.round(1), use_container_width=True)
+bzu_total = protein_total + fat_total + carbohydrate_total
 
-# Экспорт в Excel
-if not current_df.empty:
-    current_df = current_df.round(1)
-    current_mealtime = current_mealtime.round(1)
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer_engine:
-        current_mealtime.to_excel(writer_engine, index=False, sheet_name='Summary')
-        current_df.to_excel(writer_engine, index=False, sheet_name='Details')
+with kcal:
+    st.metric("sum AVG Ккал:", f"{kcal_total:.1f}" if kcal_total else 0)
+with protein:
+    st.metric("Белки:", f"{protein_total:.1f} | {(protein_total*100/bzu_total):.1f} %" if protein_total else 0)
+with fat:
+    st.metric("Жиры:", f"{fat_total:.1f} | {(fat_total*100/bzu_total):.1f} %" if fat_total else 0)
+with carb:
+    st.metric("Углеводы:", f"{carbohydrate_total:.1f} | {(carbohydrate_total*100/bzu_total):.1f} %" if carbohydrate_total else 0)
+
+if not df_mealtime.empty or not df.empty:
+    st.divider()
+    st.subheader("Выгрузка результатов")
     
+    buffer = io.BytesIO()
+    
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer_engine:
+        if not df_mealtime.empty:
+            df_mealtime.to_excel(writer_engine, index=False, sheet_name='Summary_Meals')
+        if not df.empty:
+            df.to_excel(writer_engine, index=False, sheet_name='Detailed_Stats')
+            
     st.download_button(
-        label="📥 Скачать отчет (Excel)",
+        label="📥 Скачать расчет в Excel",
         data=buffer.getvalue(),
-        file_name="diet_analysis.xlsx",
+        file_name="diet_report.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
